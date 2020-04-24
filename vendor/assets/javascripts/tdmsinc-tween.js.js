@@ -1,510 +1,378 @@
 /**
  * Tween.js - Licensed under the MIT license
- * https://github.com/tweenjs/tween.js
+ * https://github.com/sole/tween.js
  * ----------------------------------------------
  *
- * See https://github.com/tweenjs/tween.js/graphs/contributors for the full list of contributors.
+ * See https://github.com/sole/tween.js/graphs/contributors for the full list of contributors.
  * Thank you all, you're awesome!
  */
 
+// Date.now shim for (ahem) Internet Explo(d|r)er
+if ( Date.now === undefined ) {
 
-var _Group = function () {
-	this._tweens = {};
-	this._tweensAddedDuringUpdate = {};
-};
+	Date.now = function () {
 
-_Group.prototype = {
-	getAll: function () {
+		return new Date().valueOf();
 
-		return Object.keys(this._tweens).map(function (tweenId) {
-			return this._tweens[tweenId];
-		}.bind(this));
+	};
 
-	},
+}
 
-	removeAll: function () {
+var TWEEN = TWEEN || ( function () {
 
-		this._tweens = {};
+	var _tweens = [];
 
-	},
+	return {
 
-	add: function (tween) {
+		REVISION: '14',
 
-		this._tweens[tween.getId()] = tween;
-		this._tweensAddedDuringUpdate[tween.getId()] = tween;
+		getAll: function () {
 
-	},
+			return _tweens;
 
-	remove: function (tween) {
+		},
 
-		delete this._tweens[tween.getId()];
-		delete this._tweensAddedDuringUpdate[tween.getId()];
+		removeAll: function () {
 
-	},
+			_tweens = [];
 
-	update: function (time, preserve) {
+		},
 
-		var tweenIds = Object.keys(this._tweens);
+		add: function ( tween ) {
 
-		if (tweenIds.length === 0) {
-			return false;
-		}
+			_tweens.push( tween );
 
-		time = time !== undefined ? time : TWEEN.now();
+		},
 
-		// Tweens are updated in "batches". If you add a new tween during an
-		// update, then the new tween will be updated in the next batch.
-		// If you remove a tween during an update, it may or may not be updated.
-		// However, if the removed tween was added during the current batch,
-		// then it will not be updated.
-		while (tweenIds.length > 0) {
-			this._tweensAddedDuringUpdate = {};
+		remove: function ( tween ) {
 
-			for (var i = 0; i < tweenIds.length; i++) {
+			var i = _tweens.indexOf( tween );
 
-				var tween = this._tweens[tweenIds[i]];
+			if ( i !== -1 ) {
 
-				if (tween && tween.update(time) === false) {
-					tween._isPlaying = false;
+				_tweens.splice( i, 1 );
 
-					if (!preserve) {
-						delete this._tweens[tweenIds[i]];
-					}
-				}
 			}
 
-			tweenIds = Object.keys(this._tweensAddedDuringUpdate);
-		}
+		},
 
-		return true;
+		update: function ( time ) {
+
+			if ( _tweens.length === 0 ) return false;
+
+			var i = 0;
+
+			time = time !== undefined ? time : ( typeof window !== 'undefined' && window.performance !== undefined && window.performance.now !== undefined ? window.performance.now() : Date.now() );
+
+			while ( i < _tweens.length ) {
+
+				if ( _tweens[ i ].update( time ) ) {
+
+					i++;
+
+				} else {
+
+					_tweens.splice( i, 1 );
+
+				}
+
+			}
+
+			return true;
+
+		}
+	};
+
+} )();
+
+TWEEN.Tween = function ( object ) {
+
+	var _object = object;
+	var _valuesStart = {};
+	var _valuesEnd = {};
+	var _valuesStartRepeat = {};
+	var _duration = 1000;
+	var _repeat = 0;
+	var _yoyo = false;
+	var _isPlaying = false;
+	var _reversed = false;
+	var _delayTime = 0;
+	var _startTime = null;
+	var _easingFunction = TWEEN.Easing.Linear.None;
+	var _interpolationFunction = TWEEN.Interpolation.Linear;
+	var _chainedTweens = [];
+	var _onStartCallback = null;
+	var _onStartCallbackFired = false;
+	var _onUpdateCallback = null;
+	var _onCompleteCallback = null;
+	var _onStopCallback = null;
+
+	// Set all starting values present on the target object
+	for ( var field in object ) {
+
+		_valuesStart[ field ] = parseFloat(object[field], 10);
 
 	}
-};
 
-var TWEEN = new _Group();
+	this.to = function ( properties, duration ) {
 
-TWEEN.Group = _Group;
-TWEEN._nextId = 0;
-TWEEN.nextId = function () {
-	return TWEEN._nextId++;
-};
+		if ( duration !== undefined ) {
 
+			_duration = duration;
 
-// Include a performance.now polyfill.
-// In node.js, use process.hrtime.
-if (typeof (self) === 'undefined' && typeof (process) !== 'undefined' && process.hrtime) {
-	TWEEN.now = function () {
-		var time = process.hrtime();
-
-		// Convert [seconds, nanoseconds] to milliseconds.
-		return time[0] * 1000 + time[1] / 1000000;
-	};
-}
-// In a browser, use self.performance.now if it is available.
-else if (typeof (self) !== 'undefined' &&
-         self.performance !== undefined &&
-		 self.performance.now !== undefined) {
-	// This must be bound, because directly assigning this function
-	// leads to an invocation exception in Chrome.
-	TWEEN.now = self.performance.now.bind(self.performance);
-}
-// Use Date.now if it is available.
-else if (Date.now !== undefined) {
-	TWEEN.now = Date.now;
-}
-// Otherwise, use 'new Date().getTime()'.
-else {
-	TWEEN.now = function () {
-		return new Date().getTime();
-	};
-}
-
-
-TWEEN.Tween = function (object, group) {
-	this._isPaused = false;
-	this._pauseStart = null;
-	this._object = object;
-	this._valuesStart = {};
-	this._valuesEnd = {};
-	this._valuesStartRepeat = {};
-	this._duration = 1000;
-	this._repeat = 0;
-	this._repeatDelayTime = undefined;
-	this._yoyo = false;
-	this._isPlaying = false;
-	this._reversed = false;
-	this._delayTime = 0;
-	this._startTime = null;
-	this._easingFunction = TWEEN.Easing.Linear.None;
-	this._interpolationFunction = TWEEN.Interpolation.Linear;
-	this._chainedTweens = [];
-	this._onStartCallback = null;
-	this._onStartCallbackFired = false;
-	this._onUpdateCallback = null;
-	this._onRepeatCallback = null;
-	this._onCompleteCallback = null;
-	this._onStopCallback = null;
-	this._group = group || TWEEN;
-	this._id = TWEEN.nextId();
-
-};
-
-TWEEN.Tween.prototype = {
-	getId: function () {
-		return this._id;
-	},
-
-	isPlaying: function () {
-		return this._isPlaying;
-	},
-
-	isPaused: function () {
-		return this._isPaused;
-	},
-
-	to: function (properties, duration) {
-
-		this._valuesEnd = Object.create(properties);
-
-		if (duration !== undefined) {
-			this._duration = duration;
 		}
 
+		_valuesEnd = properties;
+
 		return this;
 
-	},
+	};
 
-	duration: function duration(d) {
-		this._duration = d;
-		return this;
-	},
+	this.start = function ( time ) {
 
-	start: function (time) {
+		TWEEN.add( this );
 
-		this._group.add(this);
+		_isPlaying = true;
 
-		this._isPlaying = true;
+		_onStartCallbackFired = false;
 
-		this._isPaused = false;
+		_startTime = time !== undefined ? time : ( typeof window !== 'undefined' && window.performance !== undefined && window.performance.now !== undefined ? window.performance.now() : Date.now() );
+		_startTime += _delayTime;
 
-		this._onStartCallbackFired = false;
+		for ( var property in _valuesEnd ) {
 
-		this._startTime = time !== undefined ? typeof time === 'string' ? TWEEN.now() + parseFloat(time) : time : TWEEN.now();
-		this._startTime += this._delayTime;
+			// check if an Array was provided as property value
+			if ( _valuesEnd[ property ] instanceof Array ) {
 
-		for (var property in this._valuesEnd) {
+				if ( _valuesEnd[ property ].length === 0 ) {
 
-			// Check if an Array was provided as property value
-			if (this._valuesEnd[property] instanceof Array) {
-
-				if (this._valuesEnd[property].length === 0) {
 					continue;
+
 				}
 
-				// Create a local copy of the Array with the start value at the front
-				this._valuesEnd[property] = [this._object[property]].concat(this._valuesEnd[property]);
+				// create a local copy of the Array with the start value at the front
+				_valuesEnd[ property ] = [ _object[ property ] ].concat( _valuesEnd[ property ] );
 
 			}
 
-			// If `to()` specifies a property that doesn't exist in the source object,
-			// we should not set that property in the object
-			if (this._object[property] === undefined) {
-				continue;
+			_valuesStart[ property ] = _object[ property ];
+
+			if( ( _valuesStart[ property ] instanceof Array ) === false ) {
+				_valuesStart[ property ] *= 1.0; // Ensures we're using numbers, not strings
 			}
 
-			// Save the starting value, but only once.
-			if (typeof(this._valuesStart[property]) === 'undefined') {
-				this._valuesStart[property] = this._object[property];
-			}
-
-			if ((this._valuesStart[property] instanceof Array) === false) {
-				this._valuesStart[property] *= 1.0; // Ensures we're using numbers, not strings
-			}
-
-			this._valuesStartRepeat[property] = this._valuesStart[property] || 0;
+			_valuesStartRepeat[ property ] = _valuesStart[ property ] || 0;
 
 		}
 
 		return this;
 
-	},
+	};
 
-	stop: function () {
+	this.stop = function () {
 
-		if (!this._isPlaying) {
+		if ( !_isPlaying ) {
 			return this;
 		}
 
-		this._group.remove(this);
+		TWEEN.remove( this );
+		_isPlaying = false;
 
-		this._isPlaying = false;
+		if ( _onStopCallback !== null ) {
 
-		this._isPaused = false;
+			_onStopCallback.call( _object );
 
-		if (this._onStopCallback !== null) {
-			this._onStopCallback(this._object);
 		}
 
 		this.stopChainedTweens();
 		return this;
 
-	},
+	};
 
-	end: function () {
+	this.stopChainedTweens = function () {
 
-		this.update(Infinity);
-		return this;
+		for ( var i = 0, numChainedTweens = _chainedTweens.length; i < numChainedTweens; i++ ) {
 
-	},
+			_chainedTweens[ i ].stop();
 
-	pause: function(time) {
-
-		if (this._isPaused || !this._isPlaying) {
-			return this;
 		}
 
-		this._isPaused = true;
+	};
 
-		this._pauseStart = time === undefined ? TWEEN.now() : time;
+	this.delay = function ( amount ) {
 
-		this._group.remove(this);
-
+		_delayTime = amount;
 		return this;
 
-	},
+	};
 
-	resume: function(time) {
+	this.repeat = function ( times ) {
 
-		if (!this._isPaused || !this._isPlaying) {
-			return this;
-		}
-
-		this._isPaused = false;
-
-		this._startTime += (time === undefined ? TWEEN.now() : time)
-			- this._pauseStart;
-
-		this._pauseStart = 0;
-
-		this._group.add(this);
-
+		_repeat = times;
 		return this;
 
-	},
+	};
 
-	stopChainedTweens: function () {
+	this.yoyo = function( yoyo ) {
 
-		for (var i = 0, numChainedTweens = this._chainedTweens.length; i < numChainedTweens; i++) {
-			this._chainedTweens[i].stop();
-		}
-
-	},
-
-	group: function (group) {
-		this._group = group;
-		return this;
-	},
-
-	delay: function (amount) {
-
-		this._delayTime = amount;
+		_yoyo = yoyo;
 		return this;
 
-	},
+	};
 
-	repeat: function (times) {
 
-		this._repeat = times;
+	this.easing = function ( easing ) {
+
+		_easingFunction = easing;
 		return this;
 
-	},
+	};
 
-	repeatDelay: function (amount) {
+	this.interpolation = function ( interpolation ) {
 
-		this._repeatDelayTime = amount;
+		_interpolationFunction = interpolation;
 		return this;
 
-	},
+	};
 
-	yoyo: function (yoyo) {
+	this.chain = function () {
 
-		this._yoyo = yoyo;
+		_chainedTweens = arguments;
 		return this;
 
-	},
+	};
 
-	easing: function (easingFunction) {
+	this.onStart = function ( callback ) {
 
-		this._easingFunction = easingFunction;
+		_onStartCallback = callback;
 		return this;
 
-	},
+	};
 
-	interpolation: function (interpolationFunction) {
+	this.onUpdate = function ( callback ) {
 
-		this._interpolationFunction = interpolationFunction;
+		_onUpdateCallback = callback;
 		return this;
 
-	},
+	};
 
-	chain: function () {
+	this.onComplete = function ( callback ) {
 
-		this._chainedTweens = arguments;
+		_onCompleteCallback = callback;
 		return this;
 
-	},
+	};
 
-	onStart: function (callback) {
+	this.onStop = function ( callback ) {
 
-		this._onStartCallback = callback;
+		_onStopCallback = callback;
 		return this;
 
-	},
+	};
 
-	onUpdate: function (callback) {
-
-		this._onUpdateCallback = callback;
-		return this;
-
-	},
-
-	onRepeat: function onRepeat(callback) {
-
-		this._onRepeatCallback = callback;
-		return this;
-
-	},
-
-	onComplete: function (callback) {
-
-		this._onCompleteCallback = callback;
-		return this;
-
-	},
-
-	onStop: function (callback) {
-
-		this._onStopCallback = callback;
-		return this;
-
-	},
-
-	update: function (time) {
+	this.update = function ( time ) {
 
 		var property;
-		var elapsed;
-		var value;
 
-		if (time < this._startTime) {
+		if ( time < _startTime ) {
+
 			return true;
+
 		}
 
-		if (this._onStartCallbackFired === false) {
+		if ( _onStartCallbackFired === false ) {
 
-			if (this._onStartCallback !== null) {
-				this._onStartCallback(this._object);
+			if ( _onStartCallback !== null ) {
+
+				_onStartCallback.call( _object );
+
 			}
 
-			this._onStartCallbackFired = true;
+			_onStartCallbackFired = true;
+
 		}
 
-		elapsed = (time - this._startTime) / this._duration;
-		elapsed = (this._duration === 0 || elapsed > 1) ? 1 : elapsed;
+		var elapsed = ( time - _startTime ) / _duration;
+		elapsed = elapsed > 1 ? 1 : elapsed;
 
-		value = this._easingFunction(elapsed);
+		var value = _easingFunction( elapsed );
 
-		for (property in this._valuesEnd) {
+		for ( property in _valuesEnd ) {
 
-			// Don't update properties that do not exist in the source object
-			if (this._valuesStart[property] === undefined) {
-				continue;
-			}
+			var start = _valuesStart[ property ] || 0;
+			var end = _valuesEnd[ property ];
 
-			var start = this._valuesStart[property] || 0;
-			var end = this._valuesEnd[property];
+			if ( end instanceof Array ) {
 
-			if (end instanceof Array) {
-
-				this._object[property] = this._interpolationFunction(end, value);
+				_object[ property ] = _interpolationFunction( end, value );
 
 			} else {
 
 				// Parses relative end values with start as base (e.g.: +10, -3)
-				if (typeof (end) === 'string') {
-
-					if (end.charAt(0) === '+' || end.charAt(0) === '-') {
-						end = start + parseFloat(end);
-					} else {
-						end = parseFloat(end);
-					}
+				if ( typeof(end) === "string" ) {
+					end = start + parseFloat(end, 10);
 				}
 
-				// Protect against non numeric properties.
-				if (typeof (end) === 'number') {
-					this._object[property] = start + (end - start) * value;
+				// protect against non numeric properties.
+				if ( typeof(end) === "number" ) {
+					_object[ property ] = start + ( end - start ) * value;
 				}
 
 			}
 
 		}
 
-		if (this._onUpdateCallback !== null) {
-			this._onUpdateCallback(this._object, elapsed);
+		if ( _onUpdateCallback !== null ) {
+
+			_onUpdateCallback.call( _object, value );
+
 		}
 
-		if (elapsed === 1) {
+		if ( elapsed == 1 ) {
 
-			if (this._repeat > 0) {
+			if ( _repeat > 0 ) {
 
-				if (isFinite(this._repeat)) {
-					this._repeat--;
+				if( isFinite( _repeat ) ) {
+					_repeat--;
 				}
 
-				// Reassign starting values, restart by making startTime = now
-				for (property in this._valuesStartRepeat) {
+				// reassign starting values, restart by making startTime = now
+				for( property in _valuesStartRepeat ) {
 
-					if (typeof (this._valuesEnd[property]) === 'string') {
-						this._valuesStartRepeat[property] = this._valuesStartRepeat[property] + parseFloat(this._valuesEnd[property]);
+					if ( typeof( _valuesEnd[ property ] ) === "string" ) {
+						_valuesStartRepeat[ property ] = _valuesStartRepeat[ property ] + parseFloat(_valuesEnd[ property ], 10);
 					}
 
-					if (this._yoyo) {
-						var tmp = this._valuesStartRepeat[property];
-
-						this._valuesStartRepeat[property] = this._valuesEnd[property];
-						this._valuesEnd[property] = tmp;
+					if (_yoyo) {
+						var tmp = _valuesStartRepeat[ property ];
+						_valuesStartRepeat[ property ] = _valuesEnd[ property ];
+						_valuesEnd[ property ] = tmp;
 					}
 
-					this._valuesStart[property] = this._valuesStartRepeat[property];
+					_valuesStart[ property ] = _valuesStartRepeat[ property ];
 
 				}
 
-				if (this._yoyo) {
-					this._reversed = !this._reversed;
+				if (_yoyo) {
+					_reversed = !_reversed;
 				}
 
-				if (this._repeatDelayTime !== undefined) {
-					this._startTime = time + this._repeatDelayTime;
-				} else {
-					this._startTime = time + this._delayTime;
-				}
-
-				if (this._onRepeatCallback !== null) {
-					this._onRepeatCallback(this._object);
-				}
+				_startTime = time + _delayTime;
 
 				return true;
 
 			} else {
 
-				if (this._onCompleteCallback !== null) {
+				if ( _onCompleteCallback !== null ) {
 
-					this._onCompleteCallback(this._object);
+					_onCompleteCallback.call( _object );
+
 				}
 
-				for (var i = 0, numChainedTweens = this._chainedTweens.length; i < numChainedTweens; i++) {
-					// Make the chained tweens start exactly at the time they should,
-					// even if the `update()` method was called way past the duration of the tween
-					this._chainedTweens[i].start(this._startTime + this._duration);
+				for ( var i = 0, numChainedTweens = _chainedTweens.length; i < numChainedTweens; i++ ) {
+
+					_chainedTweens[ i ].start( time );
+
 				}
 
 				return false;
@@ -515,7 +383,8 @@ TWEEN.Tween.prototype = {
 
 		return true;
 
-	}
+	};
+
 };
 
 
@@ -523,7 +392,7 @@ TWEEN.Easing = {
 
 	Linear: {
 
-		None: function (k) {
+		None: function ( k ) {
 
 			return k;
 
@@ -533,25 +402,22 @@ TWEEN.Easing = {
 
 	Quadratic: {
 
-		In: function (k) {
+		In: function ( k ) {
 
 			return k * k;
 
 		},
 
-		Out: function (k) {
+		Out: function ( k ) {
 
-			return k * (2 - k);
+			return k * ( 2 - k );
 
 		},
 
-		InOut: function (k) {
+		InOut: function ( k ) {
 
-			if ((k *= 2) < 1) {
-				return 0.5 * k * k;
-			}
-
-			return - 0.5 * (--k * (k - 2) - 1);
+			if ( ( k *= 2 ) < 1 ) return 0.5 * k * k;
+			return - 0.5 * ( --k * ( k - 2 ) - 1 );
 
 		}
 
@@ -559,25 +425,22 @@ TWEEN.Easing = {
 
 	Cubic: {
 
-		In: function (k) {
+		In: function ( k ) {
 
 			return k * k * k;
 
 		},
 
-		Out: function (k) {
+		Out: function ( k ) {
 
 			return --k * k * k + 1;
 
 		},
 
-		InOut: function (k) {
+		InOut: function ( k ) {
 
-			if ((k *= 2) < 1) {
-				return 0.5 * k * k * k;
-			}
-
-			return 0.5 * ((k -= 2) * k * k + 2);
+			if ( ( k *= 2 ) < 1 ) return 0.5 * k * k * k;
+			return 0.5 * ( ( k -= 2 ) * k * k + 2 );
 
 		}
 
@@ -585,25 +448,22 @@ TWEEN.Easing = {
 
 	Quartic: {
 
-		In: function (k) {
+		In: function ( k ) {
 
 			return k * k * k * k;
 
 		},
 
-		Out: function (k) {
+		Out: function ( k ) {
 
-			return 1 - (--k * k * k * k);
+			return 1 - ( --k * k * k * k );
 
 		},
 
-		InOut: function (k) {
+		InOut: function ( k ) {
 
-			if ((k *= 2) < 1) {
-				return 0.5 * k * k * k * k;
-			}
-
-			return - 0.5 * ((k -= 2) * k * k * k - 2);
+			if ( ( k *= 2 ) < 1) return 0.5 * k * k * k * k;
+			return - 0.5 * ( ( k -= 2 ) * k * k * k - 2 );
 
 		}
 
@@ -611,25 +471,22 @@ TWEEN.Easing = {
 
 	Quintic: {
 
-		In: function (k) {
+		In: function ( k ) {
 
 			return k * k * k * k * k;
 
 		},
 
-		Out: function (k) {
+		Out: function ( k ) {
 
 			return --k * k * k * k * k + 1;
 
 		},
 
-		InOut: function (k) {
+		InOut: function ( k ) {
 
-			if ((k *= 2) < 1) {
-				return 0.5 * k * k * k * k * k;
-			}
-
-			return 0.5 * ((k -= 2) * k * k * k * k + 2);
+			if ( ( k *= 2 ) < 1 ) return 0.5 * k * k * k * k * k;
+			return 0.5 * ( ( k -= 2 ) * k * k * k * k + 2 );
 
 		}
 
@@ -637,21 +494,21 @@ TWEEN.Easing = {
 
 	Sinusoidal: {
 
-		In: function (k) {
+		In: function ( k ) {
 
-			return 1 - Math.cos(k * Math.PI / 2);
-
-		},
-
-		Out: function (k) {
-
-			return Math.sin(k * Math.PI / 2);
+			return 1 - Math.cos( k * Math.PI / 2 );
 
 		},
 
-		InOut: function (k) {
+		Out: function ( k ) {
 
-			return 0.5 * (1 - Math.cos(Math.PI * k));
+			return Math.sin( k * Math.PI / 2 );
+
+		},
+
+		InOut: function ( k ) {
+
+			return 0.5 * ( 1 - Math.cos( Math.PI * k ) );
 
 		}
 
@@ -659,33 +516,24 @@ TWEEN.Easing = {
 
 	Exponential: {
 
-		In: function (k) {
+		In: function ( k ) {
 
-			return k === 0 ? 0 : Math.pow(1024, k - 1);
-
-		},
-
-		Out: function (k) {
-
-			return k === 1 ? 1 : 1 - Math.pow(2, - 10 * k);
+			return k === 0 ? 0 : Math.pow( 1024, k - 1 );
 
 		},
 
-		InOut: function (k) {
+		Out: function ( k ) {
 
-			if (k === 0) {
-				return 0;
-			}
+			return k === 1 ? 1 : 1 - Math.pow( 2, - 10 * k );
 
-			if (k === 1) {
-				return 1;
-			}
+		},
 
-			if ((k *= 2) < 1) {
-				return 0.5 * Math.pow(1024, k - 1);
-			}
+		InOut: function ( k ) {
 
-			return 0.5 * (- Math.pow(2, - 10 * (k - 1)) + 2);
+			if ( k === 0 ) return 0;
+			if ( k === 1 ) return 1;
+			if ( ( k *= 2 ) < 1 ) return 0.5 * Math.pow( 1024, k - 1 );
+			return 0.5 * ( - Math.pow( 2, - 10 * ( k - 1 ) ) + 2 );
 
 		}
 
@@ -693,25 +541,22 @@ TWEEN.Easing = {
 
 	Circular: {
 
-		In: function (k) {
+		In: function ( k ) {
 
-			return 1 - Math.sqrt(1 - k * k);
-
-		},
-
-		Out: function (k) {
-
-			return Math.sqrt(1 - (--k * k));
+			return 1 - Math.sqrt( 1 - k * k );
 
 		},
 
-		InOut: function (k) {
+		Out: function ( k ) {
 
-			if ((k *= 2) < 1) {
-				return - 0.5 * (Math.sqrt(1 - k * k) - 1);
-			}
+			return Math.sqrt( 1 - ( --k * k ) );
 
-			return 0.5 * (Math.sqrt(1 - (k -= 2) * k) + 1);
+		},
+
+		InOut: function ( k ) {
+
+			if ( ( k *= 2 ) < 1) return - 0.5 * ( Math.sqrt( 1 - k * k) - 1);
+			return 0.5 * ( Math.sqrt( 1 - ( k -= 2) * k) + 1);
 
 		}
 
@@ -719,51 +564,37 @@ TWEEN.Easing = {
 
 	Elastic: {
 
-		In: function (k) {
+		In: function ( k ) {
 
-			if (k === 0) {
-				return 0;
-			}
-
-			if (k === 1) {
-				return 1;
-			}
-
-			return -Math.pow(2, 10 * (k - 1)) * Math.sin((k - 1.1) * 5 * Math.PI);
+			var s, a = 0.1, p = 0.4;
+			if ( k === 0 ) return 0;
+			if ( k === 1 ) return 1;
+			if ( !a || a < 1 ) { a = 1; s = p / 4; }
+			else s = p * Math.asin( 1 / a ) / ( 2 * Math.PI );
+			return - ( a * Math.pow( 2, 10 * ( k -= 1 ) ) * Math.sin( ( k - s ) * ( 2 * Math.PI ) / p ) );
 
 		},
 
-		Out: function (k) {
+		Out: function ( k ) {
 
-			if (k === 0) {
-				return 0;
-			}
-
-			if (k === 1) {
-				return 1;
-			}
-
-			return Math.pow(2, -10 * k) * Math.sin((k - 0.1) * 5 * Math.PI) + 1;
+			var s, a = 0.1, p = 0.4;
+			if ( k === 0 ) return 0;
+			if ( k === 1 ) return 1;
+			if ( !a || a < 1 ) { a = 1; s = p / 4; }
+			else s = p * Math.asin( 1 / a ) / ( 2 * Math.PI );
+			return ( a * Math.pow( 2, - 10 * k) * Math.sin( ( k - s ) * ( 2 * Math.PI ) / p ) + 1 );
 
 		},
 
-		InOut: function (k) {
+		InOut: function ( k ) {
 
-			if (k === 0) {
-				return 0;
-			}
-
-			if (k === 1) {
-				return 1;
-			}
-
-			k *= 2;
-
-			if (k < 1) {
-				return -0.5 * Math.pow(2, 10 * (k - 1)) * Math.sin((k - 1.1) * 5 * Math.PI);
-			}
-
-			return 0.5 * Math.pow(2, -10 * (k - 1)) * Math.sin((k - 1.1) * 5 * Math.PI) + 1;
+			var s, a = 0.1, p = 0.4;
+			if ( k === 0 ) return 0;
+			if ( k === 1 ) return 1;
+			if ( !a || a < 1 ) { a = 1; s = p / 4; }
+			else s = p * Math.asin( 1 / a ) / ( 2 * Math.PI );
+			if ( ( k *= 2 ) < 1 ) return - 0.5 * ( a * Math.pow( 2, 10 * ( k -= 1 ) ) * Math.sin( ( k - s ) * ( 2 * Math.PI ) / p ) );
+			return a * Math.pow( 2, -10 * ( k -= 1 ) ) * Math.sin( ( k - s ) * ( 2 * Math.PI ) / p ) * 0.5 + 1;
 
 		}
 
@@ -771,31 +602,25 @@ TWEEN.Easing = {
 
 	Back: {
 
-		In: function (k) {
+		In: function ( k ) {
 
 			var s = 1.70158;
-
-			return k * k * ((s + 1) * k - s);
+			return k * k * ( ( s + 1 ) * k - s );
 
 		},
 
-		Out: function (k) {
+		Out: function ( k ) {
 
 			var s = 1.70158;
-
-			return --k * k * ((s + 1) * k + s) + 1;
+			return --k * k * ( ( s + 1 ) * k + s ) + 1;
 
 		},
 
-		InOut: function (k) {
+		InOut: function ( k ) {
 
 			var s = 1.70158 * 1.525;
-
-			if ((k *= 2) < 1) {
-				return 0.5 * (k * k * ((s + 1) * k - s));
-			}
-
-			return 0.5 * ((k -= 2) * k * ((s + 1) * k + s) + 2);
+			if ( ( k *= 2 ) < 1 ) return 0.5 * ( k * k * ( ( s + 1 ) * k - s ) );
+			return 0.5 * ( ( k -= 2 ) * k * ( ( s + 1 ) * k + s ) + 2 );
 
 		}
 
@@ -803,33 +628,38 @@ TWEEN.Easing = {
 
 	Bounce: {
 
-		In: function (k) {
+		In: function ( k ) {
 
-			return 1 - TWEEN.Easing.Bounce.Out(1 - k);
+			return 1 - TWEEN.Easing.Bounce.Out( 1 - k );
 
 		},
 
-		Out: function (k) {
+		Out: function ( k ) {
 
-			if (k < (1 / 2.75)) {
+			if ( k < ( 1 / 2.75 ) ) {
+
 				return 7.5625 * k * k;
-			} else if (k < (2 / 2.75)) {
-				return 7.5625 * (k -= (1.5 / 2.75)) * k + 0.75;
-			} else if (k < (2.5 / 2.75)) {
-				return 7.5625 * (k -= (2.25 / 2.75)) * k + 0.9375;
+
+			} else if ( k < ( 2 / 2.75 ) ) {
+
+				return 7.5625 * ( k -= ( 1.5 / 2.75 ) ) * k + 0.75;
+
+			} else if ( k < ( 2.5 / 2.75 ) ) {
+
+				return 7.5625 * ( k -= ( 2.25 / 2.75 ) ) * k + 0.9375;
+
 			} else {
-				return 7.5625 * (k -= (2.625 / 2.75)) * k + 0.984375;
+
+				return 7.5625 * ( k -= ( 2.625 / 2.75 ) ) * k + 0.984375;
+
 			}
 
 		},
 
-		InOut: function (k) {
+		InOut: function ( k ) {
 
-			if (k < 0.5) {
-				return TWEEN.Easing.Bounce.In(k * 2) * 0.5;
-			}
-
-			return TWEEN.Easing.Bounce.Out(k * 2 - 1) * 0.5 + 0.5;
+			if ( k < 0.5 ) return TWEEN.Easing.Bounce.In( k * 2 ) * 0.5;
+			return TWEEN.Easing.Bounce.Out( k * 2 - 1 ) * 0.5 + 0.5;
 
 		}
 
@@ -839,66 +669,45 @@ TWEEN.Easing = {
 
 TWEEN.Interpolation = {
 
-	Linear: function (v, k) {
+	Linear: function ( v, k ) {
 
-		var m = v.length - 1;
-		var f = m * k;
-		var i = Math.floor(f);
-		var fn = TWEEN.Interpolation.Utils.Linear;
+		var m = v.length - 1, f = m * k, i = Math.floor( f ), fn = TWEEN.Interpolation.Utils.Linear;
 
-		if (k < 0) {
-			return fn(v[0], v[1], f);
-		}
+		if ( k < 0 ) return fn( v[ 0 ], v[ 1 ], f );
+		if ( k > 1 ) return fn( v[ m ], v[ m - 1 ], m - f );
 
-		if (k > 1) {
-			return fn(v[m], v[m - 1], m - f);
-		}
-
-		return fn(v[i], v[i + 1 > m ? m : i + 1], f - i);
+		return fn( v[ i ], v[ i + 1 > m ? m : i + 1 ], f - i );
 
 	},
 
-	Bezier: function (v, k) {
+	Bezier: function ( v, k ) {
 
-		var b = 0;
-		var n = v.length - 1;
-		var pw = Math.pow;
-		var bn = TWEEN.Interpolation.Utils.Bernstein;
+		var b = 0, n = v.length - 1, pw = Math.pow, bn = TWEEN.Interpolation.Utils.Bernstein, i;
 
-		for (var i = 0; i <= n; i++) {
-			b += pw(1 - k, n - i) * pw(k, i) * v[i] * bn(n, i);
+		for ( i = 0; i <= n; i++ ) {
+			b += pw( 1 - k, n - i ) * pw( k, i ) * v[ i ] * bn( n, i );
 		}
 
 		return b;
 
 	},
 
-	CatmullRom: function (v, k) {
+	CatmullRom: function ( v, k ) {
 
-		var m = v.length - 1;
-		var f = m * k;
-		var i = Math.floor(f);
-		var fn = TWEEN.Interpolation.Utils.CatmullRom;
+		var m = v.length - 1, f = m * k, i = Math.floor( f ), fn = TWEEN.Interpolation.Utils.CatmullRom;
 
-		if (v[0] === v[m]) {
+		if ( v[ 0 ] === v[ m ] ) {
 
-			if (k < 0) {
-				i = Math.floor(f = m * (1 + k));
-			}
+			if ( k < 0 ) i = Math.floor( f = m * ( 1 + k ) );
 
-			return fn(v[(i - 1 + m) % m], v[i], v[(i + 1) % m], v[(i + 2) % m], f - i);
+			return fn( v[ ( i - 1 + m ) % m ], v[ i ], v[ ( i + 1 ) % m ], v[ ( i + 2 ) % m ], f - i );
 
 		} else {
 
-			if (k < 0) {
-				return v[0] - (fn(v[0], v[0], v[1], v[1], -f) - v[0]);
-			}
+			if ( k < 0 ) return v[ 0 ] - ( fn( v[ 0 ], v[ 0 ], v[ 1 ], v[ 1 ], -f ) - v[ 0 ] );
+			if ( k > 1 ) return v[ m ] - ( fn( v[ m ], v[ m ], v[ m - 1 ], v[ m - 1 ], f - m ) - v[ m ] );
 
-			if (k > 1) {
-				return v[m] - (fn(v[m], v[m], v[m - 1], v[m - 1], f - m) - v[m]);
-			}
-
-			return fn(v[i ? i - 1 : 0], v[i], v[m < i + 1 ? m : i + 1], v[m < i + 2 ? m : i + 2], f - i);
+			return fn( v[ i ? i - 1 : 0 ], v[ i ], v[ m < i + 1 ? m : i + 1 ], v[ m < i + 2 ? m : i + 2 ], f - i );
 
 		}
 
@@ -906,59 +715,41 @@ TWEEN.Interpolation = {
 
 	Utils: {
 
-		Linear: function (p0, p1, t) {
+		Linear: function ( p0, p1, t ) {
 
-			return (p1 - p0) * t + p0;
+			return ( p1 - p0 ) * t + p0;
 
 		},
 
-		Bernstein: function (n, i) {
+		Bernstein: function ( n , i ) {
 
 			var fc = TWEEN.Interpolation.Utils.Factorial;
-
-			return fc(n) / fc(i) / fc(n - i);
+			return fc( n ) / fc( i ) / fc( n - i );
 
 		},
 
-		Factorial: (function () {
+		Factorial: ( function () {
 
-			var a = [1];
+			var a = [ 1 ];
 
-			return function (n) {
+			return function ( n ) {
 
-				var s = 1;
-
-				if (a[n]) {
-					return a[n];
-				}
-
-				for (var i = n; i > 1; i--) {
-					s *= i;
-				}
-
-				a[n] = s;
-				return s;
+				var s = 1, i;
+				if ( a[ n ] ) return a[ n ];
+				for ( i = n; i > 1; i-- ) s *= i;
+				return a[ n ] = s;
 
 			};
 
-		})(),
+		} )(),
 
-		CatmullRom: function (p0, p1, p2, p3, t) {
+		CatmullRom: function ( p0, p1, p2, p3, t ) {
 
-			var v0 = (p2 - p0) * 0.5;
-			var v1 = (p3 - p1) * 0.5;
-			var t2 = t * t;
-			var t3 = t * t2;
-
-			return (2 * p1 - 2 * p2 + v0 + v1) * t3 + (- 3 * p1 + 3 * p2 - 2 * v0 - v1) * t2 + v0 * t + p1;
+			var v0 = ( p2 - p0 ) * 0.5, v1 = ( p3 - p1 ) * 0.5, t2 = t * t, t3 = t * t2;
+			return ( 2 * p1 - 2 * p2 + v0 + v1 ) * t3 + ( - 3 * p1 + 3 * p2 - 2 * v0 - v1 ) * t2 + v0 * t + p1;
 
 		}
 
 	}
 
 };
-
-import {version} from '../.temp.version.js';
-TWEEN.version = version;
-
-export default TWEEN;
