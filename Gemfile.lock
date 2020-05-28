@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    qrates-assets (0.1.0)
+    qrates-assets (0.1.1)
 
 GEM
   remote: https://rubygems.org/
